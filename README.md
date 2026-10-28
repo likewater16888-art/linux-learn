@@ -1,3 +1,5 @@
+﻿> **鍦ㄧ嚎璁块棶锛?* https://likewater16888-art.github.io/linux-learn/
+
 # Linux 学习指南（WSL2 入门）· 银河系知识地图
 
 一个**纯前端、零构建、双击即用**的 Linux 入门交互学习站。内容源自 `../Linux学习指南_WSL2入门.md`，
@@ -9,7 +11,7 @@
 
 ## 一、怎么打开
 
-**方式 0（给别人分享用）**：在线地址 `https://<你的用户名>.github.io/linux-learn/`，手机、平板、别人的电脑打开就能用，
+**方式 0（给别人分享用）**：在线地址 **https://likewater16888-art.github.io/linux-learn/** ，手机、平板、别人的电脑打开就能用，
 不需要装任何东西、不需要网络环境配合（D3 已内置）。发布方法见 **第十一章「发布与分享」**。
 
 **方式 1（最简单）**：直接双击 `index.html`，用 Chrome / Edge 打开。

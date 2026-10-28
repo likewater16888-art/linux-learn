@@ -1,4 +1,4 @@
-# 发布契约 · PUBLISH
+﻿# 发布契约 · PUBLISH
 
 > 这个文件是**给我（AI 助手）看的执行说明**，也是给人看的说明书。
 > 用法：把项目文件夹（里面要带 `PUBLISH.md` + `publish.config.json`）丢给我，说一句「**发布**」。
@@ -19,7 +19,7 @@
 | 仓库名 | `linux-learn` |
 | 可见性 | **public**（GitHub 免费账号只有公开仓库能开 Pages） |
 | 分支 | `main` |
-| 预计公开地址 | `https://<你的用户名>.github.io/linux-learn/` |
+| 预计公开地址 | `https://likewater16888-art.github.io/linux-learn/` |
 | 外部依赖 | **无**（D3 已内置在 `js/lib/d3.min.js`，不再依赖 CDN） |
 | 敏感信息 | **无**（正文已核查：无 API Key / token / 密码；用户自填的 Key 只存浏览器 localStorage） |
 
@@ -39,8 +39,8 @@
 
 | 名称 | 地址 |
 | --- | --- |
-| 🌐 公开访问 | <!-- 首次发布后自动填入 --> 待发布 |
-| 📦 源码仓库 | 待发布 |
+| 🌐 公开访问 | **https://likewater16888-art.github.io/linux-learn/** （已上线，2026-10 验证 200） |
+| 📦 源码仓库 | https://github.com/likewater16888-art/linux-learn |
 
 ## 5. 发布后怎么更新
 
