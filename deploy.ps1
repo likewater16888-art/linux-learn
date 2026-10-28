@@ -5,11 +5,20 @@
     .\deploy.ps1                                  # use gh (logged in) or $env:GH_TOKEN
     .\deploy.ps1 -Owner yourname                  # state the account explicitly
     .\deploy.ps1 -Repo my-site -Message "feat: x"
+    .\deploy.ps1 -Mode new                        # one project = one new repository (default)
+    .\deploy.ps1 -Mode existing -Subdir demos/foo # put this folder INTO an existing repo subdir
+    .\deploy.ps1 -Mode existing -Repo my-hub -Subdir sites/foo
     .\deploy.ps1 -DryRun                          # everything except push / pages
     .\deploy.ps1 -Force                           # overwrite remote history
     .\deploy.ps1 -Private                         # private repo (needs Pro for Pages)
 
+  Modes:
+    new        create/ensure repo <owner>/<repo>, push this folder as the repo root
+    existing   reuse an existing repo; with -Subdir the folder is copied to that
+               subdirectory (other files in the repo are left untouched)
+
   Notes:
+    * repo name: -Repo  >  publish.config.json repo.name  >  folder name (slugified)
     * The token is never written to disk or to the git remote URL.
     * Requires: git.  Optional but recommended: gh (GitHub CLI, `gh auth login`).
 #>
@@ -19,11 +28,15 @@ param(
   [string]$Repo,
   [string]$Branch,
   [string]$Message,
+  [ValidateSet('', 'new', 'existing')][string]$Mode,
+  [string]$Subdir,
+  [string]$RemoteBase = 'https://github.com',
   [string]$Token = $env:GH_TOKEN,
   [string]$Email,
   [switch]$Private,
   [switch]$Force,
   [switch]$DryRun,
+  [switch]$SkipPages,
   [int]$WaitSeconds = 240
 )
 
@@ -62,6 +75,86 @@ function Invoke-Exe {
   return @{ code = $code; text = (($lines | ForEach-Object { "$_" }) -join "`n") }
 }
 
+# turn any folder name into a legal GitHub repo name
+function ConvertTo-Slug {
+  param([string]$Text)
+  $t = ('' + $Text).ToLowerInvariant()
+  $t = $t -replace '[^a-z0-9._-]+', '-'
+  $t = $t -replace '-{2,}', '-'
+  $t = $t.Trim('-', '.', '_')
+  if ($t.Length -gt 64) { $t = $t.Substring(0, 64).Trim('-', '.', '_') }
+  if (-not $t) { $t = 'site-' + (Get-Date -Format 'yyyyMMdd') }
+  return $t
+}
+
+# extra args that authenticate https git calls when only a token is available
+function Get-AuthGitArgs {
+  if ($Token -and -not $ghOk) {
+    $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$Token"))
+    return @('-c', ("http.https://github.com/.extraheader=AUTHORIZATION: basic " + $basic))
+  }
+  return @()
+}
+
+# copy this folder into <SubDir> of an existing repo and push (history is kept)
+function Push-Subdir {
+  param([string]$RemoteUrl, [string]$Branch, [string]$SubDir, [string]$CommitMsg, [string]$WorkDir)
+
+  $tmp = Join-Path $env:TEMP ('publish-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+  $auth = Get-AuthGitArgs
+  $cl = Invoke-Exe 'git' ($auth + @('clone', '-q', $RemoteUrl, $tmp))
+  if ($cl.code -ne 0) {
+    # brand-new (empty) repository: start a fresh work tree and attach the remote
+    if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    $null = Invoke-Exe 'git' @('-C', $tmp, 'init', '-q', '-b', $Branch)
+    $null = Invoke-Exe 'git' @('-C', $tmp, 'remote', 'add', 'origin', $RemoteUrl)
+  } else {
+    # work on the target branch itself, whatever the remote default branch is
+    $rb = Invoke-Exe 'git' @('-C', $tmp, 'rev-parse', '--verify', '-q', ('origin/' + $Branch))
+    $hd = Invoke-Exe 'git' @('-C', $tmp, 'rev-parse', '--verify', '-q', 'HEAD')
+    if ($rb.code -eq 0) {
+      $null = Invoke-Exe 'git' @('-C', $tmp, 'checkout', '-q', '-B', $Branch, ('origin/' + $Branch))
+    } elseif ($hd.code -eq 0) {
+      $null = Invoke-Exe 'git' @('-C', $tmp, 'checkout', '-q', '-B', $Branch, 'HEAD')
+    } else {
+      $null = Invoke-Exe 'git' @('-C', $tmp, 'checkout', '-q', '--orphan', $Branch)
+    }
+  }
+
+  $dest = Join-Path $tmp $SubDir
+  if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+  New-Item -ItemType Directory -Path $dest -Force | Out-Null
+
+  # exactly the files git would publish here (.gitignore respected)
+  $files = & git -C $WorkDir ls-files -co --exclude-standard
+  $n = 0
+  foreach ($f in $files) {
+    if (-not $f) { continue }
+    $src = Join-Path $WorkDir $f
+    if (-not (Test-Path -LiteralPath $src)) { continue }
+    $dst = Join-Path $dest $f
+    $dir = Split-Path -Parent $dst
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Copy-Item -LiteralPath $src -Destination $dst -Force
+    $n++
+  }
+
+  $null = Invoke-Exe 'git' @('-C', $tmp, 'add', '-A')
+  $pending = (Invoke-Exe 'git' @('-C', $tmp, 'diff', '--cached', '--name-only')).text
+  if ($pending.Trim()) {
+    $null = Invoke-Exe 'git' @('-C', $tmp, '-c', ('user.name=' + $Owner), '-c', ('user.email=' + $Email), 'commit', '-q', '-m', $CommitMsg)
+  } else {
+    Write-Host '    [warn] nothing changed inside ' -NoNewline
+    Write-Host $SubDir -NoNewline
+    Write-Host ' - skipping commit'
+  }
+
+  $res = Invoke-Exe 'git' ($auth + @('-C', $tmp, 'push', 'origin', ('HEAD:' + $Branch)))
+  Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  return @{ code = $res.code; text = $res.text; files = $n }
+}
+
 
 # ---------------------------------------------------------------- 1. read config
 Step 'Reading publish.config.json'
@@ -69,13 +162,27 @@ $cfgPath = Join-Path $PSScriptRoot 'publish.config.json'
 if (-not (Test-Path -LiteralPath $cfgPath)) { Die 'publish.config.json not found in this folder.' }
 $cfg = Get-Content -LiteralPath $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
 
-if (-not $Repo) { $Repo = $cfg.repo.name }
+# --- target: a new repository (default) or an existing one (+ optional subdir) ---
+if (-not $Mode) { $Mode = $cfg.repo.mode }
+if (-not $Mode) { $Mode = 'new' }
+if (-not $Subdir) { $Subdir = $cfg.repo.subdir }
+if ($Subdir) { $Subdir = (($Subdir -replace '\\', '/').Trim('/')) }
+if ($Subdir) { $Mode = 'existing' }
+
+# --- repo name: -Repo  >  publish.config.json repo.name  >  this folder name ---
+$nameSrc = 'flag -Repo'
+if (-not $Repo) { $Repo = $cfg.repo.name; $nameSrc = 'publish.config.json' }
+if (-not $Repo -or $Repo -eq 'auto') { $Repo = (Split-Path -Leaf $PSScriptRoot); $nameSrc = 'folder name' }
+$slug = ConvertTo-Slug $Repo
+if ($slug -ne $Repo) { Warn ("repo name '{0}' normalised to '{1}' (from {2})" -f $Repo, $slug, $nameSrc) }
+$Repo = $slug
 if (-not $Branch) { $Branch = $cfg.repo.branch }
 if (-not $Branch) { $Branch = 'main' }
 if (-not $Message) { $Message = ('{0} publish {1}' -f $cfg.repo.commitPrefix, (Get-Date -Format 'yyyy-MM-dd HH:mm')) }
 $entry = $cfg.site.entry
 if (-not $entry) { $entry = 'index.html' }
-Good ("repo={0}  branch={1}  entry={2}" -f $Repo, $Branch, $entry)
+Good ("repo={0}  mode={1}  branch={2}  entry={3}" -f $Repo, $Mode, $Branch, $entry)
+if ($Subdir) { Good ('subdir=' + $Subdir + '  (other files in the repo stay untouched)') }
 
 if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $entry))) {
   Die ("entry file '{0}' not found - the site root must contain it." -f $entry)
@@ -148,7 +255,7 @@ if ($staged) {
   Warn 'nothing to commit - tree already matches HEAD'
 }
 
-$remoteUrl = ('https://github.com/{0}/{1}.git' -f $Owner, $Repo)
+$remoteUrl = ('{0}/{1}/{2}.git' -f $RemoteBase.TrimEnd('/'), $Owner, $Repo)
 $hasRemote = ((& git remote) -contains 'origin')
 if ($hasRemote) { & git remote set-url origin $remoteUrl } else { & git remote add origin $remoteUrl }
 Good ('remote origin -> ' + $remoteUrl)
@@ -158,101 +265,133 @@ if (-not ($ghOk -or $Token)) { Warn 'stopped: no credentials. Run `gh auth login
 
 # ------------------------------------------------------------ 5. create repo
 Step ('Ensuring repository ' + $Owner + '/' + $Repo)
+$onGitHub = ($RemoteBase.TrimEnd('/') -eq 'https://github.com')
 $hdr = @{
   Authorization          = "Bearer $Token"
   Accept                 = 'application/vnd.github+json'
   'X-GitHub-Api-Version' = '2022-11-28'
   'User-Agent'           = 'deploy.ps1'
 }
-if ($Token) {
-  $repoExists = $false
-  try {
-    $null = Invoke-RestMethod -Uri ("https://api.github.com/repos/{0}/{1}" -f $Owner, $Repo) -Headers $hdr
-    $repoExists = $true
-  } catch { $repoExists = $false }
+$repoExists = $false
+
+if ($onGitHub) {
+  if ($ghOk) {
+    $view = Invoke-Exe $gh @('repo', 'view', ("{0}/{1}" -f $Owner, $Repo))
+    if ($view.code -eq 0) { $repoExists = $true }
+  } elseif ($Token) {
+    try {
+      $null = Invoke-RestMethod -Uri ("https://api.github.com/repos/{0}/{1}" -f $Owner, $Repo) -Headers $hdr
+      $repoExists = $true
+    } catch { $repoExists = $false }
+  }
+
   if (-not $repoExists) {
-    $body = @{
-      name        = $Repo
-      description = $cfg.repo.description
-      private     = [bool]$Private
-      auto_init   = $false
-    } | ConvertTo-Json
-    $null = Invoke-RestMethod -Uri 'https://api.github.com/user/repos' -Headers $hdr -Method Post -Body $body -ContentType 'application/json'
-    Good 'repository created (REST)'
-  } else { Good 'repository already exists' }
-}
-if ($ghOk) {
-  & $gh repo view ("{0}/{1}" -f $Owner, $Repo) *> $null
-  if ($LASTEXITCODE -ne 0) {
-    $vis = '--public'
-    if ($Private) { $vis = '--private' }
-    & $gh repo create ("{0}/{1}" -f $Owner, $Repo) $vis ('--description=' + $cfg.repo.description) *> $null
-    if ($LASTEXITCODE -ne 0) { Die 'gh repo create failed.' }
-    Good 'repository created (gh)'
-  } else { Good 'repository already exists (gh)' }
+    if ($Mode -eq 'existing') {
+      Die ("{0}/{1} does not exist. Create it first, or publish with -Mode new." -f $Owner, $Repo)
+    }
+    if ($Token -and -not $ghOk) {
+      $body = @{
+        name        = $Repo
+        description = $cfg.repo.description
+        private     = [bool]$Private
+        auto_init   = $false
+      } | ConvertTo-Json
+      $null = Invoke-RestMethod -Uri 'https://api.github.com/user/repos' -Headers $hdr -Method Post -Body $body -ContentType 'application/json'
+      Good 'repository created (REST)'
+    } else {
+      $vis = '--public'
+      if ($Private) { $vis = '--private' }
+      $created = Invoke-Exe $gh @('repo', 'create', ("{0}/{1}" -f $Owner, $Repo), $vis, ('--description=' + $cfg.repo.description))
+      if ($created.code -ne 0) { Write-Host $created.text; Die 'gh repo create failed.' }
+      Good 'repository created (gh)'
+    }
+    $repoExists = $true
+  } else {
+    Good 'repository already exists - reusing it'
+  }
+} else {
+  Warn ('non-GitHub remote (' + $RemoteBase + '): repository creation skipped')
 }
 
 # ---------------------------------------------------------------- 6. push
-Step ('Pushing to ' + $Branch)
-$pushArgs = @('push', '-u', 'origin', $Branch)
-if ($Force) { $pushArgs += '--force' }
-if ($Token -and -not $ghOk) {
-  $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$Token"))
-  $pushed = Invoke-Exe 'git' (@('-c', ("http.https://github.com/.extraheader=AUTHORIZATION: basic " + $basic)) + $pushArgs)
+if ($Subdir) {
+  Step ('Publishing folder into ' + $Owner + '/' + $Repo + ':' + $Subdir)
+  $res = Push-Subdir -RemoteUrl $remoteUrl -Branch $Branch -SubDir $Subdir -CommitMsg $Message -WorkDir $PSScriptRoot
+  if ($res.code -ne 0) { Write-Host $res.text; Die ('push into ' + $Subdir + ' failed.') }
+  Good ('pushed {0} file(s) to {1} (other files untouched)' -f $res.files, $Subdir)
+  Warn 'local .git still points at the hub repo - always publish through this script'
 } else {
-  $pushed = Invoke-Exe 'git' $pushArgs
+  Step ('Pushing to ' + $Branch)
+  $pushArgs = @('push', '-u', 'origin', $Branch)
+  if ($Force) { $pushArgs += '--force' }
+  $pushed = Invoke-Exe 'git' ((Get-AuthGitArgs) + $pushArgs)
+  if ($pushed.code -ne 0) {
+    Write-Host $pushed.text
+    Die 'git push failed. If the remote already has commits, re-run with -Force.'
+  }
+  Good 'pushed'
 }
-if ($pushed.code -ne 0) {
-  Write-Host $pushed.text
-  Die 'git push failed. If the remote already has commits, re-run with -Force.'
-}
-Good 'pushed'
 
 # --------------------------------------------------------------- 7. pages
-Step 'Enabling GitHub Pages'
-$apiPages = ("https://api.github.com/repos/{0}/{1}/pages" -f $Owner, $Repo)
-if ($Token) {
-  $pageBody = @{ source = @{ branch = $Branch; path = '/' } } | ConvertTo-Json -Depth 4
-  $exists = $false
-  try { $null = Invoke-RestMethod -Uri $apiPages -Headers $hdr; $exists = $true } catch { $exists = $false }
-  if ($exists) {
-    $null = Invoke-RestMethod -Uri $apiPages -Headers $hdr -Method Put -Body $pageBody -ContentType 'application/json'
-    Good 'Pages updated (REST)'
-  } else {
-    $null = Invoke-RestMethod -Uri $apiPages -Headers $hdr -Method Post -Body $pageBody -ContentType 'application/json'
-    Good 'Pages created (REST)'
+if ($onGitHub) {
+  $shareUrl = ('https://{0}.github.io/{1}/' -f $Owner.ToLower(), $Repo)
+  if ($Subdir) { $shareUrl = ('https://{0}.github.io/{1}/{2}/' -f $Owner.ToLower(), $Repo, $Subdir) }
+} else {
+  $shareUrl = ('{0}/{1}/{2}/' -f $RemoteBase.TrimEnd('/'), $Owner, $Repo)
+}
+
+if ($SkipPages -or -not $onGitHub) {
+  Warn 'Pages step skipped (not needed for this target)'
+} else {
+  Step 'Enabling GitHub Pages'
+  $apiPages = ("https://api.github.com/repos/{0}/{1}/pages" -f $Owner, $Repo)
+  if ($Token -and -not $ghOk) {
+    $pageBody = @{ source = @{ branch = $Branch; path = '/' } } | ConvertTo-Json -Depth 4
+    $exists = $false
+    try { $null = Invoke-RestMethod -Uri $apiPages -Headers $hdr; $exists = $true } catch { $exists = $false }
+    if ($exists) {
+      $null = Invoke-RestMethod -Uri $apiPages -Headers $hdr -Method Put -Body $pageBody -ContentType 'application/json'
+      Good 'Pages updated (REST)'
+    } else {
+      $null = Invoke-RestMethod -Uri $apiPages -Headers $hdr -Method Post -Body $pageBody -ContentType 'application/json'
+      Good 'Pages created (REST)'
+    }
+  } elseif ($ghOk) {
+    $p = Invoke-Exe $gh @('api', '-X', 'POST', ("repos/{0}/{1}/pages" -f $Owner, $Repo), '-f', ('source[branch]=' + $Branch), '-f', 'source[path]=/')
+    if ($p.code -ne 0) {
+      $p = Invoke-Exe $gh @('api', '-X', 'PUT', ("repos/{0}/{1}/pages" -f $Owner, $Repo), '-f', ('source[branch]=' + $Branch), '-f', 'source[path]=/')
+    }
+    if ($p.code -ne 0) { Warn ('Pages setup returned an error: ' + $p.text) } else { Good 'Pages configured (gh)' }
   }
-} elseif ($ghOk) {
-  & $gh api -X POST ("repos/{0}/{1}/pages" -f $Owner, $Repo) -f "source[branch]=$Branch" -f 'source[path]=/' *> $null
-  if ($LASTEXITCODE -ne 0) {
-    & $gh api -X PUT ("repos/{0}/{1}/pages" -f $Owner, $Repo) -f "source[branch]=$Branch" -f 'source[path]=/' *> $null
-  }
-  Good 'Pages configured (gh)'
 }
 
 # --------------------------------------------------------------- 8. verify
-$shareUrl = ('https://{0}.github.io/{1}/' -f $Owner.ToLower(), $Repo)
-Step ('Waiting for ' + $shareUrl)
-$deadline = (Get-Date).AddSeconds($WaitSeconds)
-$alive = $false
-while ((Get-Date) -lt $deadline) {
-  try {
-    $r = Invoke-WebRequest -Uri $shareUrl -Method Head -UseBasicParsing -TimeoutSec 20
-    if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 400) { $alive = $true; break }
-  } catch { }
-  Start-Sleep -Seconds 10
-}
-if ($alive) { Good 'site is live' } else { Warn 'not live yet - Pages may need another minute.' }
+if ($onGitHub) {
+  Step ('Waiting for ' + $shareUrl)
+  $deadline = (Get-Date).AddSeconds($WaitSeconds)
+  $alive = $false
+  while ((Get-Date) -lt $deadline) {
+    try {
+      $r = Invoke-WebRequest -Uri $shareUrl -Method Head -UseBasicParsing -TimeoutSec 20
+      if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 400) { $alive = $true; break }
+    } catch { }
+    Start-Sleep -Seconds 10
+  }
+  if ($alive) { Good 'site is live' } else { Warn 'not live yet - Pages may need another minute.' }
 
-foreach ($u in $cfg.verify) {
-  $target = $u.Replace('{url}', $shareUrl)
-  try {
-    $r = Invoke-WebRequest -Uri $target -Method Head -UseBasicParsing -TimeoutSec 20
-    Write-Host ('    {0} {1}' -f $r.StatusCode, $target)
-  } catch { Write-Host ('    ERR {0}' -f $target) }
+  if ($cfg.verify) {
+    foreach ($u in $cfg.verify) {
+      $target = ($u -replace '\{url\}', $shareUrl)
+      try {
+        $r = Invoke-WebRequest -Uri $target -Method Head -UseBasicParsing -TimeoutSec 20
+        Write-Host ('    {0} {1}' -f $r.StatusCode, $target)
+      } catch { Write-Host ('    ERR {0}' -f $target) }
+    }
+  }
+}
 
 # ------------------------------------------------------------ 9. write back
-if ($cfg.report.writeBackToReadme) {
+if ($cfg.report.writeBackToReadme -and $onGitHub) {
   $readmePath = Join-Path $PSScriptRoot 'README.md'
   if (Test-Path -LiteralPath $readmePath) {
     $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding UTF8
@@ -267,7 +406,7 @@ if ($cfg.report.writeBackToReadme) {
   if (Test-Path -LiteralPath $pubPath) {
     $pub = Get-Content -LiteralPath $pubPath -Raw -Encoding UTF8
     $pub = $pub -replace '\| 🌐 公开访问 \|[^\r\n]*', ('| 🌐 公开访问 | ' + $shareUrl + ' |')
-    $pub = $pub -replace '\| 📦 源码仓库 \|[^\r\n]*', ('| 📦 源码仓库 | https://github.com/' + $Owner + '/' + $Repo + ' |')
+    $pub = $pub -replace '\| 📦 源码仓库 \|[^\r\n]*', ('| 📦 源码仓库 | ' + $remoteUrl + ' |')
     Set-Content -LiteralPath $pubPath -Value $pub -Encoding UTF8 -NoNewline
     Write-Host '    PUBLISH.md updated'
   }
@@ -275,11 +414,8 @@ if ($cfg.report.writeBackToReadme) {
 
 Step 'Done'
 Write-Host ''
+Write-Host ('  MODE      : ' + $Mode + $(if ($Subdir) { ' -> ' + $Subdir } else { '' }))
 Write-Host ('  SHARE URL : ' + $shareUrl) -ForegroundColor Green
-Write-Host ('  REPO      : https://github.com/{0}/{1}' -f $Owner, $Repo)
+Write-Host ('  REPO      : ' + $remoteUrl)
 Write-Host ''
 Write-Host '  Re-run this script after every change - the URL never changes.'
-
-}
-
-
