@@ -1,0 +1,40 @@
+{
+  "site": {
+    "type": "static",
+    "entry": "index.html",
+    "build": null,
+    "spa": false,
+    "note": "纯静态，无构建步骤；仓库根目录即站点根目录"
+  },
+  "repo": {
+    "owner": "auto",
+    "name": "linux-learn",
+    "visibility": "public",
+    "branch": "main",
+    "description": "纯前端 Linux 入门交互学习站：银河系知识地图 + 浏览器内置沙盒终端 + AI 学习助手",
+    "topics": ["linux", "wsl2", "tutorial", "d3", "static-site", "sandbox", "chinese"],
+    "commitPrefix": "deploy:"
+  },
+  "pages": {
+    "provider": "github",
+    "path": "/",
+    "customDomain": null,
+    "note": "GitHub 免费账号需 public 仓库才能开 Pages；私有仓库请把 provider 改成 cloudflare"
+  },
+  "include": [
+    "index.html",
+    "css/**",
+    "js/**",
+    "README.md",
+    "PUBLISH.md",
+    "publish.config.json",
+    "deploy.ps1",
+    ".gitignore"
+  ],
+  "exclude": ["_*", ".git/**", "node_modules/**", "*.out"],
+  "verify": ["{url}", "{url}js/app.js", "{url}js/sandbox.js", "{url}js/lib/d3.min.js", "{url}css/layout.css"],
+  "report": {
+    "printShareUrl": true,
+    "writeBackToReadme": true
+  }
+}

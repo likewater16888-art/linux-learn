@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Linux 学习指南（WSL2 入门）· 银河系知识地图</title>
+  <meta name="description" content="纯前端 Linux 入门交互学习站：银河系知识地图、11 个主题 130 个知识点、175 道动手例题（可一键在浏览器内置沙盒终端里跑）、AI 学习助手（本地知识库 + 可选在线大模型）。" />
+  <meta name="theme-color" content="#05070f" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐧</text></svg>" />
+
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+
+  <!--
+    D3 v7（本地内置，v7.9.0，约 273 KB）。整站唯一第三方依赖，已随仓库分发：
+    加载成功 → 用 forceSimulation 生成力导向星系布局；
+    本地文件缺失（例如只拷了部分文件）→ 回落到 CDN；
+    CDN 也不可用（离线 / 被墙）→ js/galaxy.js 自动降级为内置辐射布局，功能不受影响。
+  -->
+  <script src="js/lib/d3.min.js"></script>
+  <script>
+    /* 本地 D3 没加载成功时的兜底（同步 document.write，保证脚本顺序） */
+    if (!window.d3) {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"><\/script>');
+    }
+  </script>
+</head>
+
+<body>
+  <div id="app">
+
+    <!-- ================================ 顶部栏 ================================ -->
+    <header class="topbar">
+      <button id="btnMenu" class="icon-btn menu-btn" type="button" title="打开目录" aria-label="打开目录">☰</button>
+
+      <div class="brand">
+        <span class="brand-logo" aria-hidden="true">🐧</span>
+        <span class="brand-text">
+          <span class="brand-title">Linux 学习指南 · WSL2 入门</span>
+          <span class="brand-sub">Galaxy Knowledge Map</span>
+        </span>
+      </div>
+
+      <label class="search">
+        <input id="search" type="search" autocomplete="off"
+               placeholder="搜索命令或概念，回车定位（按 / 聚焦）" aria-label="搜索知识点" />
+      </label>
+
+      <div class="top-actions">
+        <div class="ring" title="整体学习进度">
+          <svg viewBox="0 0 42 42" aria-hidden="true">
+            <circle class="track" cx="21" cy="21" r="17"></circle>
+            <circle id="ringProgress" class="progress" cx="21" cy="21" r="17"></circle>
+          </svg>
+          <span id="ringText" class="ring-text">0%</span>
+        </div>
+        <button id="themeToggle" class="icon-btn" type="button" title="切换主题" aria-label="切换主题">🌙</button>
+      </div>
+    </header>
+
+    <!-- ================================ 工作区 ================================ -->
+    <div class="workspace">
+
+      <!-- ------------------------------ 左侧目录 ------------------------------ -->
+      <aside id="sidebar" class="sidebar" aria-label="课程目录">
+        <div class="sidebar-head">
+          <div class="sidebar-title">
+            <span>7 天学习进度</span>
+            <span id="quizStat" class="quiz-stat">练习：✅ 0 ／ ❌ 0</span>
+          </div>
+          <div class="overall-bar"><span id="overallBar"></span></div>
+          <p id="overallText" class="overall-text">已完成 0 / 0 个知识点</p>
+        </div>
+
+        <nav id="treeList" class="tree" aria-label="知识点目录"></nav>
+
+        <div class="sidebar-foot">
+          <span>进度保存在本机浏览器</span>
+          <button id="btnReset" class="btn xs ghost" type="button" title="清空学习进度">重置进度</button>
+        </div>
+      </aside>
+
+      <div id="sidebarBackdrop" class="backdrop"></div>
+
+      <!-- ------------------------------ 星图 + 详情 ------------------------------ -->
+      <main class="viewport">
+
+        <div id="galaxyWrap" class="galaxy-wrap">
+          <svg id="galaxy" role="img" aria-label="Linux 知识银河系星图"></svg>
+
+          <div id="galaxyTip" class="galaxy-tip" aria-hidden="true"></div>
+
+          <div class="map-tools">
+            <button id="zoomIn" type="button" title="放大">＋</button>
+            <button id="zoomOut" type="button" title="缩小">－</button>
+            <button id="zoomFit" type="button" title="自适应视野">⤢</button>
+            <button id="btnExpandAll" class="wide" type="button" title="展开全部知识点">展开全部</button>
+            <button id="btnCollapseAll" class="wide" type="button" title="折叠回主题">折叠</button>
+            <button id="btnTerm" class="wide" type="button" title="打开沙盒终端，边学边敲">终端</button>
+          </div>
+
+          <span id="d3Badge" class="map-badge">布局加载中…</span>
+        </div>
+
+        <aside id="lessonPanel" class="lesson-panel" aria-label="知识点详情">
+          <div class="lesson-panel-head">
+            <span class="lesson-panel-title">知识点详情</span>
+            <button id="btnCloseLesson" class="icon-btn" type="button" title="关闭（Esc）" aria-label="关闭详情">✕</button>
+          </div>
+          <div id="lessonBody" class="lesson-body"></div>
+        </aside>
+
+      </main>
+    </div>
+
+    <!-- ================================ AI 助手 ================================ -->
+    <button id="chatFab" class="chat-fab" type="button" title="AI 学习助手" aria-label="打开 AI 学习助手">🤖</button>
+
+    <section id="chatPanel" class="chat-panel" aria-label="AI 学习助手">
+      <div class="chat-head">
+        <span class="chat-title">🤖 学习助手</span>
+        <span id="chatMode" class="mode-badge is-local">本地知识库</span>
+        <span class="spacer"></span>
+        <button id="btnChatSettings" class="icon-btn" type="button" title="设置 API Key">⚙</button>
+        <button id="btnChatClose" class="icon-btn" type="button" title="关闭（Esc）" aria-label="关闭助手">✕</button>
+      </div>
+
+      <div id="chatSettings" class="chat-settings">
+        <label for="apiKeyInput">API Key（仅保存在本机 localStorage）</label>
+        <input id="apiKeyInput" data-field="apiKey" type="password" autocomplete="off"
+               placeholder="sk-...（留空即使用本地知识库）" />
+        <label for="apiUrlInput">接口地址（OpenAI 兼容）</label>
+        <input id="apiUrlInput" data-field="apiUrl" type="text" autocomplete="off"
+               placeholder="https://api.deepseek.com/v1/chat/completions" />
+        <label for="apiModelInput">模型名</label>
+        <input id="apiModelInput" data-field="model" type="text" autocomplete="off"
+               placeholder="deepseek-chat / gpt-4o-mini" />
+        <div class="row">
+          <button class="btn sm primary js-save" type="button">保存</button>
+          <button class="btn sm ghost js-clear" type="button">清除 Key</button>
+        </div>
+        <p class="hint">Key 只存在你自己的浏览器里，由浏览器直接请求接口。请求失败会自动降级回本地知识库。</p>
+      </div>
+
+      <div id="chatList" class="chat-list" aria-live="polite"></div>
+
+      <div class="chat-quick">
+        <button type="button" data-ask="chmod 全称是什么？">chmod 全称</button>
+        <button type="button" data-ask="给我一道 tar 的练习题">出一道题</button>
+        <button type="button" data-ask="删错文件能恢复吗？">删错能恢复吗</button>
+        <button type="button" data-ask="推荐的学习顺序是什么？">学习顺序</button>
+      </div>
+
+      <form id="chatForm" class="chat-form" autocomplete="off">
+        <input id="chatInput" class="chat-input" type="text" placeholder="问我任何 Linux 问题…" aria-label="输入问题" />
+        <button id="chatSend" type="submit" title="发送" aria-label="发送">➤</button>
+      </form>
+    </section>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </div>
+
+  <!-- ================================ 沙盒终端 ================================ -->
+  <button id="termFab" class="term-fab" type="button" title="打开沙盒终端（Ctrl + `）" aria-label="打开沙盒终端">⌨️</button>
+
+  <section id="termPanel" class="term-panel" aria-label="沙盒终端">
+    <div class="term-head">
+      <span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="term-title">沙盒终端</span>
+      <span id="termScenario" class="term-scenario">默认工作区</span>
+      <span class="spacer"></span>
+      <button id="termHelp" class="icon-btn" type="button" title="命令清单">?</button>
+      <button id="termReset" class="icon-btn" type="button" title="重置沙盒（恢复初始文件）">⟳</button>
+      <button id="termClose" class="icon-btn" type="button" title="关闭（Esc）" aria-label="关闭终端">✕</button>
+    </div>
+    <div id="termOut" class="term-out"></div>
+    <div class="term-line">
+      <span id="termPrompt" class="term-prompt">student@wsl-desktop:~$</span>
+      <input id="termInput" class="term-input" type="text" autocomplete="off" spellcheck="false"
+             autocapitalize="off" autocorrect="off" aria-label="终端输入" />
+    </div>
+    <div class="term-foot">↑↓ 历史 · Tab 补全 · Ctrl+L 清屏 · 输入 help 看命令清单</div>
+  </section>
+
+  <!-- =========================== 脚本（顺序即依赖顺序） =========================== -->
+  <script src="js/util.js"></script>
+  <script src="js/data/knowledge.js"></script>
+  <!-- 内容扩展：按主题拆分，各自调用 LX.Data.addBranch / addChildren / addExamples -->
+  <script src="js/data/ext-terminal.js"></script>
+  <script src="js/data/ext-files.js"></script>
+  <script src="js/data/ext-sys.js"></script>
+  <script src="js/data/ext-ops.js"></script>
+  <script src="js/data/ext-extra.js"></script>
+  <script src="js/data/ext-examples.js"></script>
+  <script src="js/progress.js"></script>
+  <script src="js/quiz.js"></script>
+  <script src="js/sandbox.js"></script>
+  <script src="js/galaxy.js"></script>
+  <script src="js/lesson.js"></script>
+  <script src="js/term.js"></script>
+  <script src="js/chat.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

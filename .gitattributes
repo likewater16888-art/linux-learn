@@ -1,0 +1,5 @@
+# 统一换行：源码走 LF，Windows 脚本保留 CRLF，压缩文件不做任何转换
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.min.js -text
+*.png -text
