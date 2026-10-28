@@ -405,10 +405,11 @@ if ($cfg.report.writeBackToReadme -and $onGitHub) {
   $pubPath = Join-Path $PSScriptRoot 'PUBLISH.md'
   if (Test-Path -LiteralPath $pubPath) {
     $pub = Get-Content -LiteralPath $pubPath -Raw -Encoding UTF8
-    $pub = $pub -replace '\| 🌐 公开访问 \|[^\r\n]*', ('| 🌐 公开访问 | ' + $shareUrl + ' |')
-    $pub = $pub -replace '\| 📦 源码仓库 \|[^\r\n]*', ('| 📦 源码仓库 | ' + $remoteUrl + ' |')
-    Set-Content -LiteralPath $pubPath -Value $pub -Encoding UTF8 -NoNewline
-    Write-Host '    PUBLISH.md updated'
+    $pubStale = ($pub -notmatch [regex]::Escape($shareUrl))
+    if ($pubStale) { $pub = $pub -replace '\| 🌐 公开访问 \|[^\r\n]*', ('| 🌐 公开访问 | ' + $shareUrl + ' |') }
+    if ($pubStale) { $pub = $pub -replace '\| 📦 源码仓库 \|[^\r\n]*', ('| 📦 源码仓库 | ' + ($remoteUrl -replace '\.git$', '') + ' |') }
+    if ($pubStale) { Set-Content -LiteralPath $pubPath -Value $pub -Encoding UTF8 -NoNewline }
+    if ($pubStale) { Write-Host '    PUBLISH.md updated' }
   }
 }
 
@@ -416,6 +417,6 @@ Step 'Done'
 Write-Host ''
 Write-Host ('  MODE      : ' + $Mode + $(if ($Subdir) { ' -> ' + $Subdir } else { '' }))
 Write-Host ('  SHARE URL : ' + $shareUrl) -ForegroundColor Green
-Write-Host ('  REPO      : ' + $remoteUrl)
+Write-Host ('  REPO      : ' + ($remoteUrl -replace '\.git$',''))
 Write-Host ''
 Write-Host '  Re-run this script after every change - the URL never changes.'
