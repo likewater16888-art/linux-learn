@@ -1,4 +1,4 @@
-<#
+﻿<#
   deploy.ps1 - publish this folder to GitHub Pages, driven by publish.config.json
   ---------------------------------------------------------------------------
   Examples:

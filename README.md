@@ -1,4 +1,4 @@
-﻿> **鍦ㄧ嚎璁块棶锛?* https://likewater16888-art.github.io/linux-learn/
+﻿> **在线访问：** https://likewater16888-art.github.io/linux-learn/
 
 # Linux 学习指南（WSL2 入门）· 银河系知识地图
 
