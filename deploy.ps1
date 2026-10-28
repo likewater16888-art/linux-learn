@@ -27,7 +27,7 @@ param(
   [int]$WaitSeconds = 240
 )
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 Set-Location -LiteralPath $PSScriptRoot
 
 function Step([string]$t) { Write-Host "`n==> $t" -ForegroundColor Cyan }
@@ -49,6 +49,17 @@ function Resolve-Gh {
   if ($winget) { $cands += $winget.FullName }
   foreach ($c in $cands) { if ($c -and (Test-Path -LiteralPath $c)) { return $c } }
   return $null
+}
+
+# run an external command, capture stdout+stderr, never throw on stderr text
+function Invoke-Exe {
+  param([string]$Exe, [string[]]$ExeArgs)
+  $eap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  $lines = & $Exe @ExeArgs 2>&1
+  $code = $LASTEXITCODE
+  $ErrorActionPreference = $eap
+  return @{ code = $code; text = (($lines | ForEach-Object { "$_" }) -join "`n") }
 }
 
 
@@ -187,11 +198,14 @@ $pushArgs = @('push', '-u', 'origin', $Branch)
 if ($Force) { $pushArgs += '--force' }
 if ($Token -and -not $ghOk) {
   $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$Token"))
-  & git -c ("http.https://github.com/.extraheader=AUTHORIZATION: basic " + $basic) @pushArgs
+  $pushed = Invoke-Exe 'git' (@('-c', ("http.https://github.com/.extraheader=AUTHORIZATION: basic " + $basic)) + $pushArgs)
 } else {
-  & git @pushArgs
+  $pushed = Invoke-Exe 'git' $pushArgs
 }
-if ($LASTEXITCODE -ne 0) { Die 'git push failed. If the remote already has commits, re-run with -Force.' }
+if ($pushed.code -ne 0) {
+  Write-Host $pushed.text
+  Die 'git push failed. If the remote already has commits, re-run with -Force.'
+}
 Good 'pushed'
 
 # --------------------------------------------------------------- 7. pages
