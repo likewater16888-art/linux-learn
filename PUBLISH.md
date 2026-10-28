@@ -19,6 +19,7 @@
 | 仓库名 | `linux-learn` |
 | 可见性 | **public**（GitHub 免费账号只有公开仓库能开 Pages） |
 | 分支 | `main` |
+| 发布模式 | `new`（一个项目 = 一个独立仓库，仓库根即站点根） |
 | 预计公开地址 | `https://likewater16888-art.github.io/linux-learn/` |
 | 外部依赖 | **无**（D3 已内置在 `js/lib/d3.min.js`，不再依赖 CDN） |
 | 敏感信息 | **无**（正文已核查：无 API Key / token / 密码；用户自填的 Key 只存浏览器 localStorage） |
@@ -65,4 +66,34 @@ git add -A; git commit -m "update: xxx"; git push
 | 打开是 404 | Pages 首次构建中 | 等 1–2 分钟；确认 Settings→Pages 的 Source 是 `main` / `(root)` |
 | 页面白屏、控制台 404 | 仓库根目录不是站点根目录 | 保证 `index.html` 在仓库根目录 |
 | 星图变成同心圆 | `js/lib/d3.min.js` 没提交 | `git add js/lib/d3.min.js` 后重新发布 |
+
+## 8. 多项目：发布模式与命名（同一个脚本通用）
+
+### 8.1 三种落点
+
+| 模式 | 命令 | 仓库结构 | 公开地址 |
+| --- | --- | --- | --- |
+| A 独立仓库（默认） | `.\deploy.ps1 -Mode new` | 仓库根 = 本项目 | `https://USER.github.io/REPO/` |
+| B 复用已有仓库的根 | `.\deploy.ps1 -Mode existing` | 本项目覆盖仓库根 | `https://USER.github.io/REPO/` |
+| C 放进已有仓库的子目录 | `.\deploy.ps1 -Mode existing -Subdir sites/foo` | 只更新那一个子目录，其它文件不动 | `https://USER.github.io/REPO/sites/foo/` |
+
+模式 C 的实现：临时 clone 目标仓库 → 把本目录文件（按 `.gitignore` 过滤后）复制进 `子目录/` → 提交并 push 回 `main`，不改动仓库里其它路径，因此可以一个仓库放多个项目。
+
+### 8.2 仓库名怎么定
+
+优先级：命令行 `-Repo` > `publish.config.json` 的 `repo.name` > 本文件夹名（自动转 slug）。
+`repo.name` 写 `auto` 也等于"按文件夹名自动取名"。
+
+转换规则：转小写；非 `a-z0-9._-` 的字符变 `-`；连续 `-` 合并；首尾 `- . _` 去掉；超 64 字符截断；整段为空（例如中文文件夹名）则回退为 `site-YYYYMMDD`。脚本每次都会打印最终使用的名字，不满意就 `-Repo 新名字`。
+
+### 8.3 重名处理
+
+- 仓库已存在 → 直接复用（幂等，重复运行安全）。
+- 想另开一个新仓库 → 换 `-Repo`。
+- `-Mode existing` 但仓库不存在 → 脚本直接报错退出，不会偷偷新建。
+
+### 8.4 发布前先看计划
+
+`.\deploy.ps1 -DryRun` 只做本地检查与提交，不 push、不开 Pages，用来确认"名字/模式/地址"三项是否符合预期。
+
 | 在线 AI 模式报跨域 | 接口不允许浏览器直连 | 改用支持 CORS 的接口，或继续用本地知识库模式 |

@@ -7,13 +7,16 @@
     "note": "纯静态，无构建步骤；仓库根目录即站点根目录"
   },
   "repo": {
+    "mode": "new",
     "owner": "auto",
     "name": "linux-learn",
+    "subdir": null,
     "visibility": "public",
     "branch": "main",
     "description": "纯前端 Linux 入门交互学习站：银河系知识地图 + 浏览器内置沙盒终端 + AI 学习助手",
     "topics": ["linux", "wsl2", "tutorial", "d3", "static-site", "sandbox", "chinese"],
-    "commitPrefix": "deploy:"
+    "commitPrefix": "deploy:",
+    "note": "mode=new 建独立仓库（仓库根=站点根）；mode=existing 复用已有仓库，subdir 为空则发布到仓库根，subdir 有值则只更新该子目录，其余文件不动。name 写 auto 表示按文件夹名自动命名。"
   },
   "pages": {
     "provider": "github",
